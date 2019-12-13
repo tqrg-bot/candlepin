@@ -14,6 +14,8 @@
  */
 package org.candlepin.policy.entitlement;
 
+import static org.candlepin.policy.entitlement.PoolValidator.*;
+
 import org.candlepin.bind.PoolOperationCallback;
 import org.candlepin.common.config.Configuration;
 import org.candlepin.config.ConfigProperties;
@@ -32,6 +34,8 @@ import org.candlepin.model.Pool;
 import org.candlepin.model.PoolQuantity;
 import org.candlepin.model.Product;
 import org.candlepin.model.ProductCurator;
+import org.candlepin.policy.RulesValidationError;
+import org.candlepin.policy.RulesValidationWarning;
 import org.candlepin.policy.ValidationError;
 import org.candlepin.policy.ValidationResult;
 import org.candlepin.policy.js.JsRunner;
@@ -66,6 +70,89 @@ import java.util.stream.Stream;
  * Enforces entitlement rules for normal (non-manifest) consumers.
  */
 public class EntitlementRules implements Enforcer {
+
+    /**
+     * Keys that represent the various warnings that can be produced by the EntitlementRules.
+     * Warning messages may use the following variable(s):
+     * {0} - pool id
+     */
+    public enum WarningKeys implements RulesValidationWarning {
+        ARCHITECTURE_MISMATCH("The entitlement's product architecture does not match with " +
+            "the consumer's."),
+        DERIVED_PRODUCT_UNSUPPORTED_BY_CONSUMER("Unit does not support derived products data required " +
+            "by pool \"{0}\""),
+        VCPU_NUMBER_UNSUPPORTED("Pool \"{0}\" does not cover the consumer's vcpus."),
+        SOCKET_NUMBER_UNSUPPORTED("Pool \"{0}\" does not cover the consumer's sockets."),
+        CORE_NUMBER_UNSUPPORTED("Pool \"{0}\" does not cover the consumer's cores."),
+        RAM_NUMBER_UNSUPPORTED("Pool \"{0}\" does not cover the consumer's ram."),
+        STORAGE_BAND_NUMBER_UNSUPPORTED("Pool \"{0}\" does not cover the consumer's storage band usage."),
+        CORES_UNSUPPORTED_BY_CONSUMER("Unit does not support core calculation required by pool \"{0}\""),
+        RAM_UNSUPPORTED_BY_CONSUMER("Unit does not support RAM calculation required by pool \"{0}\""),
+        STORAGE_BAND_UNSUPPORTED_BY_CONSUMER("Unit does not support storage band calculation required by " +
+            "pool \"{0}\""),
+        VIRT_ONLY("Pool is restricted to virtual guests: \"{0}\"."),
+        PHYSICAL_ONLY("Pool is restricted to physical systems: \"{0}\".");
+
+        private final String warnmsg;
+
+        /**
+         * Key constructor that accepts the warning's translatable message.
+         * @param warnmsg The translatable message of the warning that this enum represents.
+         */
+        WarningKeys(String warnmsg) {
+            this.warnmsg = warnmsg;
+        }
+
+        @Override
+        public String buildWarningMessage(I18n i18n, Object... args) {
+            return i18n.tr(this.warnmsg, args);
+        }
+    }
+
+    /**
+     * Keys that represent the various errors that can be produced by the EntitlementRules.
+     * Error messages may use the following variable(s):
+     * {0} - pool id
+     * {1} - consumer username
+     * {2} - host consumer uuid
+     */
+    public enum ErrorKeys implements RulesValidationError {
+        DERIVED_PRODUCT_UNSUPPORTED_BY_CONSUMER("Unit does not support derived products data required " +
+            "by pool \"{0}\""),
+        ALREADY_ATTACHED("This unit has already had the subscription matching pool ID \"{0}\" attached."),
+        MULTI_ENTITLEMENT_UNSUPPORTED("Multi-entitlement not supported for pool with ID \"{0}\"."),
+        CONSUMER_TYPE_MISMATCH("Units of this type are not allowed to attach the pool with ID \"{0}\"."),
+        POOL_NOT_AVAILABLE_TO_USER("Pool \"{0}\" is not available to user \"{1}\"."),
+        CORES_UNSUPPORTED_BY_CONSUMER("Unit does not support core calculation required by pool \"{0}\""),
+        RAM_UNSUPPORTED_BY_CONSUMER("Unit does not support RAM calculation required by pool \"{0}\""),
+        STORAGE_BAND_UNSUPPORTED_BY_CONSUMER("Unit does not support band calculation required by pool " +
+            "\"{0}\""),
+        RESTRICTED_POOL("Pool not available to subscription management applications."),
+        VIRT_ONLY("Pool is restricted to virtual guests: \"{0}\"."),
+        PHYSICAL_ONLY("Pool is restricted to physical systems: \"{0}\"."),
+        UNMAPPED_GUEST_RESTRICTED("Pool is restricted to unmapped virtual guests: \"{0}\""),
+        VIRTUAL_GUEST_RESTRICTED("Pool is restricted to virtual guests in their first day of existence: " +
+            "\"{0}\""),
+        TEMPORARY_FUTURE_POOL("Pool is restricted when it is temporary and begins in the future: \"{0}\""),
+        CONSUMER_MISMATCH("Pool \"{0}\" is restricted to a specific consumer."),
+        VIRT_HOST_MISMATCH("Pool \"{0}\" is restricted to guests running on host: \"{2}\".");
+
+        private final String errmsg;
+
+        /**
+         * Key constructor that accepts the error's translatable message.
+         * @param errmsg The translatable message of the error that this enum represents.
+         */
+        ErrorKeys(String errmsg) {
+            this.errmsg = errmsg;
+        }
+
+        @Override
+        public String buildErrorMessage(I18n i18n, Object... args) {
+            return i18n.tr(this.errmsg, args);
+        }
+    }
+
     private static final Logger log = LoggerFactory.getLogger(EntitlementRules.class);
 
     private DateSource dateSource;
@@ -135,39 +222,36 @@ public class EntitlementRules implements Enforcer {
         /* This document describes the java script portion of the pre entitlement rules check:
          * http://www.candlepinproject.org/docs/candlepin/pre_entitlement_rules_check.html
          */
-        Stream<EntitlementDTO> entStream = consumer.getEntitlements() == null ? Stream.empty() :
-            consumer.getEntitlements().stream()
-                .map(this.translator.getStreamMapper(Entitlement.class, EntitlementDTO.class));
 
+        ConsumerType ctype = this.consumerTypeCurator.getConsumerType(consumer);
 
-        JsonJsContext args = new JsonJsContext(objectMapper);
-        args.put("consumer", this.translator.translate(consumer, ConsumerDTO.class));
-        args.put("hostConsumer", this.translator.translate(host, ConsumerDTO.class));
-        args.put("consumerEntitlements", entStream.collect(Collectors.toSet()));
-        args.put("standalone", config.getBoolean(ConfigProperties.STANDALONE));
-        args.put("poolQuantities", entitlementPoolQuantities);
-        args.put("caller", caller.getLabel());
-        args.put("log", log, false);
+        for (PoolQuantity poolQuantity : entitlementPoolQuantities) {
+            Pool pool = poolQuantity.getPool();
+            int quantity = poolQuantity.getQuantity();
+            PoolValidationData validationData = new PoolValidationData.Builder()
+                .setCaller(caller)
+                .setConsumer(consumer)
+                .setConsumerType(ctype)
+                .setPool(pool)
+                .setQuantity(quantity)
+                .setHostConsumer(host)
+                .build();
 
-        String json = jsRules.runJsFunction(String.class, "validate_pools_batch", args);
-
-        TypeReference<Map<String, ValidationResult>> typeref =
-            new TypeReference<Map<String, ValidationResult>>() {};
-        try {
-            resultMap = objectMapper.toObject(json, typeref);
-            for (PoolQuantity poolQuantity : entitlementPoolQuantities) {
-                if (!resultMap.containsKey(poolQuantity.getPool().getId())) {
-                    resultMap.put(poolQuantity.getPool().getId(), new ValidationResult());
-                    log.info("no result returned for pool: {}", poolQuantity.getPool());
+            ValidationResult result = new ValidationResult();
+            for (PoolValidator validator: PoolValidator.values()) {
+                if (pool.hasMergedAttribute(validator.getAttributeKey()) || validator == GLOBAL) {
+                    validator.validate(validationData, result);
                 }
-
             }
-        }
-        catch (Exception e) {
-            throw new RuleExecutionException(e);
+            resultMap.put(pool.getId(), result);
         }
 
         for (PoolQuantity poolQuantity : entitlementPoolQuantities) {
+            if (!resultMap.containsKey(poolQuantity.getPool().getId())) {
+                resultMap.put(poolQuantity.getPool().getId(), new ValidationResult());
+                log.info("no result returned for pool: {}", poolQuantity.getPool());
+            }
+
             finishValidation(resultMap.get(poolQuantity.getPool().getId()),
                 poolQuantity.getPool(), poolQuantity.getQuantity());
         }
@@ -281,8 +365,7 @@ public class EntitlementRules implements Enforcer {
     // Always ensure that we do not over consume.
     // FIXME for auto sub stacking, we need to be able to pull across multiple
     // pools eventually, so this would need to go away in that case
-    protected void validatePoolQuantity(ValidationResult result, Pool pool,
-        int quantity) {
+    protected void validatePoolQuantity(ValidationResult result, Pool pool, int quantity) {
         if (!pool.entitlementsAvailable(quantity)) {
             result.addError(EntitlementRulesTranslator.PoolErrorKeys.NO_ENTITLEMENTS_AVAILABLE);
         }

@@ -29,6 +29,7 @@ public class ValidationResult {
     private List<ValidationError> errors;
     private List<ValidationWarning> warnings;
     private List<RulesValidationError> errorKeys;
+    private List<RulesValidationWarning> warningKeys;
 
     /**
      * default ctor
@@ -37,6 +38,7 @@ public class ValidationResult {
         errors = new LinkedList<>();
         warnings = new LinkedList<>();
         errorKeys = new LinkedList<>();
+        warningKeys = new LinkedList<>();
     }
 
     /**
@@ -80,6 +82,22 @@ public class ValidationResult {
     }
 
     /**
+     * Return the list of warning keys if any.
+     * @return the list of warning keys if any.
+     */
+    public List<RulesValidationWarning> getWarningKeys() {
+        return warningKeys;
+    }
+
+    /**
+     * Add a warningKey
+     * @param warningKey warning key to add
+     */
+    public void addWarning(RulesValidationWarning warningKey) {
+        warningKeys.add(warningKey);
+    }
+
+    /**
      * Return the list of warnings if any.
      * @return the list of warnings if any.
      */
@@ -107,6 +125,7 @@ public class ValidationResult {
         errors.addAll(result.getErrors());
         warnings.addAll(result.getWarnings());
         errorKeys.addAll(result.getErrorKeys());
+        warningKeys.addAll(result.getWarningKeys());
     }
 
     /**
@@ -131,6 +150,14 @@ public class ValidationResult {
      */
     public boolean hasWarnings() {
         return !warnings.isEmpty();
+    }
+
+    /**
+     * Returns true if there were any warning keys during validation.
+     * @return true if there were any warning keys during validation.
+     */
+    public boolean hasWarningKeys() {
+        return !warningKeys.isEmpty();
     }
 
     /**

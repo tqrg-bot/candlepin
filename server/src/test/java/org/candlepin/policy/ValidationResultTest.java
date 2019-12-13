@@ -88,6 +88,34 @@ public class ValidationResultTest {
     }
 
     @Test
+    public void emptyWarningKeys() {
+        assertNotNull(vr.getWarningKeys());
+        assertTrue(vr.getWarningKeys().isEmpty());
+    }
+
+    @Test
+    public void addWarningKeyNull() {
+        vr.addWarning((RulesValidationWarning) null);
+        assertFalse(vr.getWarningKeys().isEmpty());
+        assertNull(vr.getWarningKeys().get(0));
+    }
+
+    @Test
+    public void addWarningKey() {
+        RulesValidationWarning vw = mock(RulesValidationWarning.class);
+        vr.addWarning(vw);
+        assertFalse(vr.getWarningKeys().isEmpty());
+        assertEquals(vw, vr.getWarningKeys().get(0));
+    }
+
+    @Test
+    public void hasWarningKeys() {
+        assertFalse(vr.hasWarningKeys());
+        vr.addWarning(mock(RulesValidationWarning.class));
+        assertTrue(vr.hasWarningKeys());
+    }
+
+    @Test
     public void getWarnings() {
         assertTrue(vr.getWarnings().isEmpty());
     }

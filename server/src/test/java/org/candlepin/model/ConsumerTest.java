@@ -30,7 +30,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 
 import java.util.Date;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import javax.inject.Inject;
 import javax.validation.ConstraintViolationException;
@@ -513,5 +515,52 @@ public class ConsumerTest extends DatabaseTestFixture {
 
         consumer = consumerCurator.get(cid);
         assertTrue(consumer.getUsage().isEmpty());
+    }
+
+
+    @Test
+    public void testIsCapable() {
+        Consumer consumer = new Consumer();
+        Set<ConsumerCapability> capabilitySet = new HashSet<>();
+        capabilitySet.add(new ConsumerCapability(consumer, "random_capability"));
+        capabilitySet.add(new ConsumerCapability(consumer, "derived_product"));
+        consumer.setCapabilities(capabilitySet);
+
+        assertTrue(consumer.isCapable("derived_product"));
+    }
+
+    @Test
+    public void testIsNotCapable() {
+        Consumer consumer = new Consumer();
+        Set<ConsumerCapability> capabilitySet = new HashSet<>();
+        capabilitySet.add(new ConsumerCapability(consumer, "random_capability"));
+        capabilitySet.add(new ConsumerCapability(consumer, "another_random_capability"));
+        consumer.setCapabilities(capabilitySet);
+
+        assertFalse(consumer.isCapable("derived_product"));
+    }
+
+    @Test
+    public void testConsumerIsNotNewBornWhenNotPersistedYet() {
+        Consumer consumer = new Consumer();
+
+        assertFalse(consumer.isNewborn());
+    }
+
+    @Test
+    public void testConsumerIsNewBorn() {
+        Consumer consumer = new Consumer();
+        consumer.setCreated(new Date());
+
+        assertTrue(consumer.isNewborn());
+    }
+
+    @Test
+    public void testConsumerIsNotNewBornIfCreatedMoreThanOneDayAgo() {
+        Consumer consumer = new Consumer();
+        Date moreThanADayAgo = new Date(new Date().getTime() - 24L * 61L * 60L * 1000L);
+        consumer.setCreated(moreThanADayAgo);
+
+        assertFalse(consumer.isNewborn());
     }
 }

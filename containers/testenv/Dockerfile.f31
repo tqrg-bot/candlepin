@@ -1,0 +1,34 @@
+# This container provides a reusable test environment for candlepin.
+# The goals for it are be reusable as a quick environment for developers
+# that can also be used as a Jenkins Node.
+
+# TODO: change to UBI
+FROM fedora:31
+
+ARG JENKINS_REMOTING_VERSION=3.35
+ARG USER=jenkins
+ARG UID=1000
+ARG JAVA_VERSION=java-1.8.0
+
+ENV HOME /home/${USER}
+ENV JAVA_HOME /usr/lib/jvm/${JAVA_VERSION}/
+
+RUN useradd -c "Jenkins user" -d /home/${USER} -u ${UID} -m ${USER}
+
+RUN yum clean all && \
+    yum install --disablerepo=updates -y \
+    gettext \
+    git \
+    jss \
+    openssl \
+    ${JAVA_VERSION}-openjdk \
+    ${JAVA_VERSION}-openjdk-devel \
+    && yum clean all
+
+RUN curl --create-dirs -sSLo /usr/share/jenkins/agent.jar https://repo.jenkins-ci.org/public/org/jenkins-ci/main/remoting/$JENKINS_REMOTING_VERSION/remoting-$JENKINS_REMOTING_VERSION.jar \
+  && chmod 755 /usr/share/jenkins \
+  && chmod 644 /usr/share/jenkins/agent.jar \
+  && ln -sf /usr/share/jenkins/agent.jar /usr/share/jenkins/slave.jar
+
+USER ${USER}
+WORKDIR /home/${USER}
